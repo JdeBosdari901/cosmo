@@ -1,0 +1,102 @@
+---
+title: "Test Branch Spin-Up and Teardown — v4 Working Draft"
+---
+flowchart TD
+    START([Start: Spin-Up]) --> S1
+
+    S1[S1 Green\ncreate_branch MCP\nSupabase automatically replicates\nschema and Edge Functions] --> C1
+    C1{project_ref\nreturned?}
+    C1 -->|Yes| S2
+    C1 -->|No| HALT[Halt — report to JdeB]
+
+    S2[S2 Green\nPoll list_branches\nuntil preview_project_status\n= ACTIVE_HEALTHY] --> C2
+    C2{ACTIVE_HEALTHY\nwithin 3 min?}
+    C2 -->|Yes| S_dry
+    C2 -->|Timeout| HALT
+
+    S_dry[S3 Green\nInject DRY_RUN=true on branch\nproject_ref via Management API\nnever production project_ref] --> C_dry
+    C_dry{DRY_RUN confirmed\nin secrets list?}
+    C_dry -->|Yes| C_seed
+    C_dry -->|No| HALT
+
+    C_seed{Test requires\nseed data?}
+    C_seed -->|No| S4
+    C_seed -->|Yes| S_seed
+
+    S_seed[S4 Green\nSeed data verification on\nbranch project_ref\nAutomatic with GitHub + seed.sql] --> S4
+
+    S4[S5 Green\nINSERT to test_branch_log\non production project_ref\nbranch_name, project_ref,\nbranch_id, purpose,\nplanned_deletion_date] --> C4
+    C4{Row confirmed\nin test_branch_log?}
+    C4 -->|Yes| S5
+    C4 -->|No| HALT
+
+    S5[S6 Green\nSlack to JdeB to-do channel\nwith branch project_ref] --> STOP1
+
+    STOP1([STOP: Branch ready\nUse branch project_ref for all\nMCP queries on branch])
+
+    STOP1 -.->|JdeB triggers deletion| D1
+
+    D1[D1 Red + M4\nPresent branch state to JdeB\nfor explicit approval\nSet approved_registry_id\nat moment of approval] --> WAIT1
+    WAIT1([STOP: Await JdeB approval])
+    WAIT1 --> D2C1
+
+    D2C1[D2 Chunk 1\nRead test_branch_log row\nWHERE id = approved_registry_id\nGet branch_id and branch_name] --> CD2C1
+    CD2C1{Row\nfound?}
+    CD2C1 -->|Yes| D2C2
+    CD2C1 -->|No| HALT
+
+    D2C2[D2 Chunk 2\ndelete_branch MCP\nbranch_id from Chunk 1\nnot project_ref] --> CD2C2
+    CD2C2{Call\nsucceeded?}
+    CD2C2 -->|Yes| D2C3
+    CD2C2 -->|Error| HALT
+
+    D2C3[D2 Chunk 3\nPoll list_branches every 30s\nuntil branch_id absent\nor 5 minutes elapsed] --> CD2C3
+    CD2C3{branch_id\nabsent?}
+    CD2C3 -->|Yes| D3C1
+    CD2C3 -->|Timeout| HALT
+
+    D3C1[D3 Chunk 1\nUPDATE test_branch_log\nSET status = ARCHIVED\narchived_at = NOW\nWHERE id = approved_registry_id] --> CD3C1
+    CD3C1{Call\nsucceeded?}
+    CD3C1 -->|Yes| D3C2
+    CD3C1 -->|Error| HALT
+
+    D3C2[D3 Chunk 2\nSELECT status, archived_at\nWHERE id = approved_registry_id\nVerify status = ARCHIVED\nCarry archived_at forward] --> CD3C2
+    CD3C2{status =\nARCHIVED?}
+    CD3C2 -->|Yes| D3C3
+    CD3C2 -->|Still ACTIVE\nor no row| HALT
+
+    D3C3[D3 Chunk 3\nHand off to D4\nbranch_name, archived_at] --> D4
+
+    D4[D4\nslack_send_message\nto jdeb_todo_channel_id\nBranch deleted confirmation] --> CD4
+    CD4{Call\nsucceeded?}
+    CD4 -->|Yes| END1([End — D4 is closing step])
+    CD4 -->|Error| HALT
+
+    style S1 fill:#c8e6c9,color:#1b5e20
+    style S2 fill:#c8e6c9,color:#1b5e20
+    style S_dry fill:#c8e6c9,color:#1b5e20
+    style S_seed fill:#c8e6c9,color:#1b5e20
+    style S4 fill:#c8e6c9,color:#1b5e20
+    style S5 fill:#c8e6c9,color:#1b5e20
+    style D2C1 fill:#c8e6c9,color:#1b5e20
+    style D2C2 fill:#c8e6c9,color:#1b5e20
+    style D2C3 fill:#c8e6c9,color:#1b5e20
+    style D3C1 fill:#c8e6c9,color:#1b5e20
+    style D3C2 fill:#c8e6c9,color:#1b5e20
+    style D3C3 fill:#c8e6c9,color:#1b5e20
+    style D4 fill:#c8e6c9,color:#1b5e20
+    style D1 fill:#ffcdd2,color:#b71c1c
+    style C1 fill:#e3f2fd,color:#0d47a1
+    style C2 fill:#e3f2fd,color:#0d47a1
+    style C_dry fill:#e3f2fd,color:#0d47a1
+    style C_seed fill:#e3f2fd,color:#0d47a1
+    style C4 fill:#e3f2fd,color:#0d47a1
+    style CD2C1 fill:#e3f2fd,color:#0d47a1
+    style CD2C2 fill:#e3f2fd,color:#0d47a1
+    style CD2C3 fill:#e3f2fd,color:#0d47a1
+    style CD3C1 fill:#e3f2fd,color:#0d47a1
+    style CD3C2 fill:#e3f2fd,color:#0d47a1
+    style CD4 fill:#e3f2fd,color:#0d47a1
+    style STOP1 fill:#e1bee7,color:#4a148c
+    style WAIT1 fill:#e1bee7,color:#4a148c
+    style HALT fill:#fff9c4,color:#e65100

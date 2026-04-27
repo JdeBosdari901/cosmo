@@ -1,0 +1,62 @@
+flowchart TD
+    classDef green fill:#c8e6c9,stroke:#388e3c,color:#1b5e20
+    classDef redC fill:#ffcdd2,stroke:#c62828,color:#b71c1c
+    classDef gate fill:#e3f2fd,stroke:#1565c0,color:#0d47a1
+    classDef stopC fill:#e1bee7,stroke:#7b1fa2,color:#4a148c
+    classDef haltC fill:#fff9c4,stroke:#f9a825,color:#e65100
+
+    START([Start: Spin-Up]) --> S1
+
+    S1["S1 Green<br>create_branch MCP<br>Supabase automatically replicates<br>schema and Edge Functions"] --> C1
+    C1{"project_ref<br>returned?"}
+    C1 -->|Yes| S2
+    C1 -->|No| HALT["Halt — report to JdeB"]
+
+    S2["S2 Green<br>Poll list_branches<br>until preview_project_status<br>= ACTIVE_HEALTHY"] --> C2
+    C2{"ACTIVE_HEALTHY<br>within 3 min?"}
+    C2 -->|Yes| S_dry
+    C2 -->|Timeout| HALT
+
+    S_dry["S3 Green<br>Inject DRY_RUN=true<br>Management API — set EF secret<br>on branch project_ref"] --> C_dry
+    C_dry{"DRY_RUN confirmed<br>in secrets list?"}
+    C_dry -->|Yes| C_seed
+    C_dry -->|No| HALT
+
+    C_seed{"Test requires<br>seed data?"}
+    C_seed -->|No| S4
+    C_seed -->|Yes| S_seed
+
+    S_seed["S4 Green<br>Seed data via execute_sql<br>on branch project_ref<br>Automatic with GitHub + seed.sql"] --> S4
+
+    S4["S5 Green<br>INSERT to test_branch_log<br>project_ref, branch_id, name<br>purpose, planned deletion date"] --> C4
+    C4{"Row confirmed<br>in test_branch_log?"}
+    C4 -->|Yes| S5
+    C4 -->|No| HALT
+
+    S5["S6 Green<br>Slack to JdeB<br>with project_ref"] --> STOP1
+
+    STOP1(["STOP: Branch ready<br>Use project_ref for all<br>MCP queries on branch"])
+
+    STOP1 -.->|"JdeB triggers deletion"| D1
+
+    D1["D1 Red + M4<br>Present branch state summary<br>to JdeB for explicit approval"] --> WAIT1
+    WAIT1(["STOP: Await JdeB approval"])
+    WAIT1 --> D2
+
+    D2["D2 Green<br>delete_branch MCP<br>using id field from test_branch_log<br>not project_ref"] --> CD2
+    CD2{"id absent from<br>list_branches?"}
+    CD2 -->|Yes| D3
+    CD2 -->|No| HALT
+
+    D3["D3 Green<br>UPDATE test_branch_log<br>status = ARCHIVED"] --> CD3
+    CD3{"Row archived?"}
+    CD3 -->|Yes| D4
+    CD3 -->|No| HALT
+
+    D4["D4 Green<br>Slack confirmation<br>to JdeB"] --> END1([End])
+
+    class S1,S2,S_dry,S_seed,S4,S5,D2,D3,D4 green
+    class D1 redC
+    class C1,C2,C_dry,C_seed,C4,CD2,CD3 gate
+    class STOP1,WAIT1 stopC
+    class HALT haltC

@@ -29,7 +29,7 @@ ON CONFLICT (id) DO NOTHING;
 -- ------------------------------------------------------------
 INSERT INTO shopify_slugs (slug, resource_type, ahrefs_confirmed, ahrefs_audit_date, species_ref_id)
 VALUES ('champagne-moment-floribunda-rose-plants', 'product', true, '2026-04-04', '1058bd1d-5a3c-4682-8523-bfe722f48723')
-ON CONFLICT (slug, resource_type) DO NOTHING;
+ON CONFLICT (slug) DO NOTHING;
 
 -- ------------------------------------------------------------
 -- governance_files — master rules + audit skill + verification hierarchy
@@ -4275,11 +4275,11 @@ ON CONFLICT (filename) DO NOTHING;
 -- ------------------------------------------------------------
 INSERT INTO faq_bank (question, answer, category, topic, faq_type, species_ref_id, status)
 VALUES
-    ('When is the best time to plant a climbing rose?', 'Plant bare-root climbing roses between November and March while dormant. Container-grown roses can go in at any time, though autumn and spring are ideal.', 'roses', 'planting', 'buyer', '1058bd1d-5a3c-4682-8523-bfe722f48723', 'approved'),
-    ('How do I train a climbing rose against a wall?', 'Fix horizontal wires 45cm apart across the wall. Fan the main stems outward at 45 degrees from the base — horizontal training encourages more flowering shoots along the length of the stem.', 'roses', 'training', 'buyer', '1058bd1d-5a3c-4682-8523-bfe722f48723', 'approved'),
-    ('How much space does a climbing rose need?', 'Most climbing roses reach 3–4m tall and spread 1.5–2m wide at maturity. Allow at least 1.5m between plants and fix supports before planting.', 'roses', 'sizing', 'buyer', '1058bd1d-5a3c-4682-8523-bfe722f48723', 'approved'),
-    ('Is Climbing Iceberg fragrant?', 'Climbing Iceberg has a light, sweet fragrance — noticeable up close on a warm day. It compensates with exceptional repeat flowering from June through to the first frosts.', 'roses', 'fragrance', 'buyer', '1058bd1d-5a3c-4682-8523-bfe722f48723', 'approved'),
-    ('When should I prune a climbing rose?', 'Prune lightly in autumn to remove dead or damaged wood. Do the main structural pruning in late winter (February–March): cut side shoots back to 2–3 buds and tie in any new long canes.', 'roses', 'pruning', 'buyer', '1058bd1d-5a3c-4682-8523-bfe722f48723', 'approved')
+    ('When is the best time to plant a climbing rose?', 'Plant bare-root climbing roses between November and March while dormant. Container-grown roses can go in at any time, though autumn and spring are ideal.', 'roses', 'planting', 'when', '1058bd1d-5a3c-4682-8523-bfe722f48723', 'approved'),
+    ('How do I train a climbing rose against a wall?', 'Fix horizontal wires 45cm apart across the wall. Fan the main stems outward at 45 degrees from the base — horizontal training encourages more flowering shoots along the length of the stem.', 'roses', 'training', 'how_to', '1058bd1d-5a3c-4682-8523-bfe722f48723', 'approved'),
+    ('How much space does a climbing rose need?', 'Most climbing roses reach 3–4m tall and spread 1.5–2m wide at maturity. Allow at least 1.5m between plants and fix supports before planting.', 'roses', 'sizing', 'how_to', '1058bd1d-5a3c-4682-8523-bfe722f48723', 'approved'),
+    ('Is Climbing Iceberg fragrant?', 'Climbing Iceberg has a light, sweet fragrance — noticeable up close on a warm day. It compensates with exceptional repeat flowering from June through to the first frosts.', 'roses', 'fragrance', 'what_is', '1058bd1d-5a3c-4682-8523-bfe722f48723', 'approved'),
+    ('When should I prune a climbing rose?', 'Prune lightly in autumn to remove dead or damaged wood. Do the main structural pruning in late winter (February–March): cut side shoots back to 2–3 buds and tie in any new long canes.', 'roses', 'pruning', 'when', '1058bd1d-5a3c-4682-8523-bfe722f48723', 'approved')
 ON CONFLICT DO NOTHING;
 
 -- ------------------------------------------------------------

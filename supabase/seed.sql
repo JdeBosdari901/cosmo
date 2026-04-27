@@ -29,7 +29,7 @@ ON CONFLICT (id) DO NOTHING;
 -- ------------------------------------------------------------
 INSERT INTO shopify_slugs (slug, resource_type, ahrefs_confirmed, ahrefs_audit_date, species_ref_id)
 VALUES ('champagne-moment-floribunda-rose-plants', 'product', true, '2026-04-04', '1058bd1d-5a3c-4682-8523-bfe722f48723')
-ON CONFLICT (slug) DO NOTHING;
+ON CONFLICT (slug, resource_type) DO NOTHING;
 
 -- ------------------------------------------------------------
 -- governance_files — master rules + audit skill + verification hierarchy

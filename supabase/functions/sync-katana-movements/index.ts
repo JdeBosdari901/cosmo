@@ -1,4 +1,4 @@
-// sync-katana-movements — v1 initial deploy
+// sync-katana-movements — v2 (adds dry_run mode)
 //
 // Polls Katana inventory_movements since a stored bookmark, enriches affected
 // variants with stock components, runs the policy decision tree (ported from
@@ -14,6 +14,8 @@
 // Sort order: pages arrive DESCENDING; we sort ASCENDING after collection.
 // Audit rows: written by fix-batch-deny only — this EF does NOT write its own.
 // Soft cap: 100 unique variants per run; remainder picked up next tick.
+// Dry-run: POST {"dry_run": true} skips the fix-batch-deny call and the
+// bookmark advance — for testing without customer-facing side effects.
 //
 // Dependencies (verified 29 Apr 2026):
 //   Tables: ef_state, katana_stock_sync, katana_products,
@@ -159,6 +161,15 @@ Deno.serve(async (req: Request) => {
     return new Response(JSON.stringify({ error: "POST required" }), { status: 405 });
   }
 
+  // Parse optional dry_run flag from request body
+  let dryRun = false;
+  try {
+    const body = await req.json();
+    if (body && typeof body.dry_run === "boolean") dryRun = body.dry_run;
+  } catch {
+    // empty body or invalid JSON — fine, default false
+  }
+
   const supabase = createClient(
     Deno.env.get("SUPABASE_URL")!,
     Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
@@ -178,6 +189,8 @@ Deno.serve(async (req: Request) => {
     policies_changed: 0,
     fix_errors: 0,
     capped: false,
+    dry_run: dryRun,
+    would_have_changed: 0,
   };
 
   // ── 1. Read bookmark ─────────────────────────────────────────────────────
@@ -343,9 +356,12 @@ Deno.serve(async (req: Request) => {
   // ── 5. Push Shopify changes via fix-batch-deny ───────────────────────────
   const toDeny = decisions.filter((d) => d.needsShopifyChange && d.target === "DENY").map((d) => d.sku);
   const toContinue = decisions.filter((d) => d.needsShopifyChange && d.target === "CONTINUE").map((d) => d.sku);
+  stats.would_have_changed = toDeny.length + toContinue.length;
   const fixBatchUrl = `${Deno.env.get("SUPABASE_URL")}/functions/v1/fix-batch-deny`;
 
-  for (const [skus, policy] of [[toDeny, "DENY"], [toContinue, "CONTINUE"]] as [string[], string][]) {
+  if (dryRun) {
+    log.push(`DRY RUN: skipping fix-batch-deny — would have changed ${toDeny.length} DENY + ${toContinue.length} CONTINUE`);
+  } else for (const [skus, policy] of [[toDeny, "DENY"], [toContinue, "CONTINUE"]] as [string[], string][]) {
     if (skus.length === 0) continue;
     for (let i = 0; i < skus.length; i += FIX_BATCH_SIZE) {
       const batch = skus.slice(i, i + FIX_BATCH_SIZE);
@@ -382,7 +398,9 @@ Deno.serve(async (req: Request) => {
   const newBookmark = new Date(new Date(bookmarkAdvanceTo).getTime() + 1).toISOString();
   stats.bookmark_to = newBookmark;
 
-  if (errors.length === 0) {
+  if (dryRun) {
+    log.push(`DRY RUN: bookmark NOT advanced (would have advanced to ${newBookmark})`);
+  } else if (errors.length === 0) {
     await supabase.from("ef_state").upsert({
       ef_slug: EF_SLUG,
       bookmark_value: newBookmark,
@@ -413,6 +431,7 @@ Deno.serve(async (req: Request) => {
     log,
     errors,
     more_pending: stats.capped,
+    decisions: decisions.slice(0, 50),
   }), { headers: { "Content-Type": "application/json" } });
 });
 

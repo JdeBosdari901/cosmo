@@ -87,7 +87,6 @@ function parseAndAggregate(jsonl: string) {
   for (const line of lines) {
     let obj: any;
     try { obj = JSON.parse(line); } catch { continue; }
-    // Product (top-level, no __parentId)
     if (obj.handle !== undefined && obj.title !== undefined) {
       products.set(obj.id, {
         id: obj.id,
@@ -123,6 +122,10 @@ Deno.serve(async (req: Request) => {
   try {
     let body: any = {};
     try { body = await req.json(); } catch { /* empty body OK */ }
+    const must_have_keys: string[] = Array.isArray(body.must_have_keys) ? body.must_have_keys : [];
+    const exclude_product_types: string[] = Array.isArray(body.exclude_product_types) ? body.exclude_product_types : [];
+    const min_media: number | null = typeof body.min_media === "number" ? body.min_media : null;
+
     const token = await getShopifyToken();
 
     let operationId = body.op_id;
@@ -137,7 +140,6 @@ Deno.serve(async (req: Request) => {
       operationId = submitResult.bulkOperation.id;
     }
 
-    // Poll up to 75s
     const pollMaxMs = 75_000;
     const pollStart = Date.now();
     let opState = await pollBulkOp(token, operationId);
@@ -154,7 +156,7 @@ Deno.serve(async (req: Request) => {
         status: opState?.status,
         objectCount: opState?.objectCount,
         rootObjectCount: opState?.rootObjectCount,
-        message: "Operation not yet complete. Re-call this EF with body { op_id: '<the operation_id>' } in 30-60s.",
+        message: "Operation not yet complete. Re-call this EF with body { op_id: '<id>' } in 30-60s.",
       }), { status: 202 });
     }
 
@@ -163,12 +165,74 @@ Deno.serve(async (req: Request) => {
     }
 
     const jsonl = await downloadJSONL(opState.url);
-    const products = parseAndAggregate(jsonl);
-    products.sort((a, b) => a.metafieldCount - b.metafieldCount || a.mediaCount - b.mediaCount || a.bodyHtmlLength - b.bodyHtmlLength);
+    const allProducts = parseAndAggregate(jsonl);
 
-    // Distribution
+    // ===== TARGETED MODE: must_have_keys / min_media filter =====
+    if (must_have_keys.length > 0 || min_media !== null) {
+      const flagged: any[] = [];
+      for (const p of allProducts) {
+        if (exclude_product_types.includes(p.productType || "")) continue;
+        const present = new Set<string>(p.metafieldKeys);
+        const missing = must_have_keys.filter((k) => !present.has(k));
+        const lowMedia = min_media !== null && p.mediaCount < min_media;
+        if (missing.length > 0 || lowMedia) {
+          flagged.push({
+            handle: p.handle,
+            title: p.title,
+            status: p.status,
+            productType: p.productType,
+            metafieldCount: p.metafieldCount,
+            mediaCount: p.mediaCount,
+            bodyHtmlLength: p.bodyHtmlLength,
+            missing_keys: missing,
+            low_media: lowMedia,
+          });
+        }
+      }
+      flagged.sort((a, b) =>
+        b.missing_keys.length - a.missing_keys.length ||
+        (a.status === "ACTIVE" ? -1 : 1) - (b.status === "ACTIVE" ? -1 : 1) ||
+        a.metafieldCount - b.metafieldCount
+      );
+
+      const keyStats: Record<string, { active: number; draft: number; total: number }> = {};
+      for (const k of must_have_keys) keyStats[k] = { active: 0, draft: 0, total: 0 };
+      for (const f of flagged) {
+        for (const k of f.missing_keys) {
+          keyStats[k].total++;
+          if (f.status === "ACTIVE") keyStats[k].active++;
+          else if (f.status === "DRAFT") keyStats[k].draft++;
+        }
+      }
+
+      const byType: Record<string, { active: number; draft: number }> = {};
+      for (const f of flagged) {
+        const t = f.productType || "(none)";
+        if (!byType[t]) byType[t] = { active: 0, draft: 0 };
+        if (f.status === "ACTIVE") byType[t].active++;
+        else if (f.status === "DRAFT") byType[t].draft++;
+      }
+
+      return new Response(JSON.stringify({
+        stage: "complete",
+        mode: "targeted",
+        operation_id: operationId,
+        objectCount: opState.objectCount,
+        completedAt: opState.completedAt,
+        total_products_audited: allProducts.length,
+        criteria: { must_have_keys, min_media, exclude_product_types },
+        flagged_count: flagged.length,
+        per_key_missing: keyStats,
+        by_product_type: byType,
+        flagged: flagged,
+      }, null, 2), { headers: { "Content-Type": "application/json" } });
+    }
+
+    // ===== DEFAULT MODE (v1 behaviour) =====
+    allProducts.sort((a, b) => a.metafieldCount - b.metafieldCount || a.mediaCount - b.mediaCount || a.bodyHtmlLength - b.bodyHtmlLength);
+
     const buckets = { '<10': 0, '10-14': 0, '15-19': 0, '20-24': 0, '25+': 0 };
-    for (const p of products) {
+    for (const p of allProducts) {
       const c = p.metafieldCount;
       if (c < 10) buckets['<10']++;
       else if (c < 15) buckets['10-14']++;
@@ -177,9 +241,8 @@ Deno.serve(async (req: Request) => {
       else buckets['25+']++;
     }
 
-    // By productType
     const byType: Record<string, any> = {};
-    for (const p of products) {
+    for (const p of allProducts) {
       const t = p.productType || "(none)";
       if (!byType[t]) byType[t] = { count: 0, sumMeta: 0, sumMedia: 0, sumBody: 0 };
       byType[t].count++;
@@ -195,20 +258,19 @@ Deno.serve(async (req: Request) => {
       avgBodyChars: Math.round(s.sumBody / s.count),
     })).sort((a, b) => b.count - a.count);
 
-    // Strip metafieldKeys list from per-product output to keep response small;
-    // include only on the bottom 50 (lowest-coverage) for closer inspection
-    const slim = products.map((p, i) => {
+    const slim = allProducts.map((p, i) => {
       const { metafieldKeys, ...rest } = p;
       return i < 50 ? { ...rest, metafieldKeys } : rest;
     });
 
     return new Response(JSON.stringify({
       stage: "complete",
+      mode: "distribution",
       operation_id: operationId,
       objectCount: opState.objectCount,
       rootObjectCount: opState.rootObjectCount,
       completedAt: opState.completedAt,
-      total_products: products.length,
+      total_products: allProducts.length,
       metafield_distribution: buckets,
       by_product_type: productTypeStats,
       products: slim,

@@ -32,8 +32,9 @@ Deno.serve(async (req: Request) => {
     return new Response(null, { headers: { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type" } });
   }
   try {
-    const { handle } = await req.json();
+    const { handle, full_keys } = await req.json();
     if (!handle) return new Response(JSON.stringify({ error: "handle required" }), { status: 400 });
+    const fullKeySet = new Set<string>(Array.isArray(full_keys) ? full_keys : []);
     const token = await getShopifyToken();
     const result = await gql(token, `{
       productByHandle(handle: "${handle}") {
@@ -83,13 +84,21 @@ Deno.serve(async (req: Request) => {
     }`);
     const p = result?.data?.productByHandle;
     if (!p) return new Response(JSON.stringify({ error: "not found", graphql: result }), { status: 404 });
-    const metafields = (p.metafields?.edges || []).map((e: any) => ({
-      namespace: e.node.namespace,
-      key: e.node.key,
-      type: e.node.type,
-      value_length: (e.node.value || "").length,
-      value_preview: (e.node.value || "").substring(0, 200),
-    }));
+    const metafields = (p.metafields?.edges || []).map((e: any) => {
+      const v = e.node.value || "";
+      const composite = `${e.node.namespace}.${e.node.key}`;
+      const row: Record<string, unknown> = {
+        namespace: e.node.namespace,
+        key: e.node.key,
+        type: e.node.type,
+        value_length: v.length,
+        value_preview: v.substring(0, 200),
+      };
+      if (fullKeySet.has(composite) || fullKeySet.has(e.node.key)) {
+        row.value_full = v;
+      }
+      return row;
+    });
     const media = (p.media?.edges || []).map((e: any) => ({
       id: e.node.id,
       type: e.node.mediaContentType,
